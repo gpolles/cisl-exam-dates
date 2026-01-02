@@ -12,10 +12,16 @@ URL = "https://iiclosangeles.esteri.it/en/lingua-e-cultura/certificazioni/"
 # Use a custom User-Agent to avoid being blocked as a bot
 HEADERS = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"}
 
+
 def send_pushover_message(user_key, api_token, message, title=None):
+    """Send a notification to Pushover. Prints errors but does not raise.
+
+    This helper is safe to call from exception handlers.
     """
-    Sends a notification to a device via Pushover.
-    """
+    if not user_key or not api_token:
+        print("Pushover credentials not set; skipping notification.")
+        return
+
     url = "https://api.pushover.net/1/messages.json"
 
     payload = {
@@ -24,51 +30,79 @@ def send_pushover_message(user_key, api_token, message, title=None):
         "message": message,
     }
 
-    # Add optional title if provided
     if title:
         payload["title"] = title
 
     try:
-        response = requests.post(url, data=payload)
-        response.raise_for_status() # Raise an error for bad responses (4xx, 5xx)
-
-        print("Message sent successfully!")
-        print(f"Server Response: {response.json()}")
-
+        response = requests.post(url, data=payload, timeout=10)
+        response.raise_for_status()
+        print("Pushover: message sent successfully")∏
     except requests.exceptions.RequestException as e:
-        print(f"Failed to send message: {e}")
+        print(f"Pushover: failed to send message: {e}")
+
 
 def check_website():
-    try:
-        response = requests.get(URL, headers=HEADERS, timeout=10)
-        response.raise_for_status()
-        
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        prompt = f"""
-            Extract the information about exam dates for citizenship applicants from 
-            the following HTML content:\n\n{response.text}\n\nJust output 'NONE' if 
-            there are no dates or are all fully booked. Otherwise, list the available 
-            dates.
-            Do not include any additional text.
-        """
-        lm_response = client.models.generate_content(
-            model="gemini-3-pro-preview",
-            contents=prompt)
-        result_text = lm_response.text.strip()
-        print(result_text)
+    """Check the CISL website and return structured result.
 
-        if result_text and result_text.upper() != "NONE":
+    Returns:
+        dict: {"has_more_dates": bool, "dates": str}
+
+    Raises:
+        Exception: on network, API, or parsing errors.
+    """
+    response = requests.get(URL, headers=HEADERS, timeout=10)
+    response.raise_for_status()
+
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    prompt = f"""
+        Extract the information about exam dates for citizenship applicants from 
+        the following HTML content:\n\n{response.text}\n\nJust output 'NONE' if 
+        there are no dates or are all fully booked. Otherwise, list the available 
+        dates.
+        Do not include any additional text.
+    """
+    lm_response = client.models.generate_content(
+        model="gemini-3-pro-preview",
+        contents=prompt)
+    result_text = lm_response.text.strip()
+
+    if not result_text:
+        return {"has_more_dates": False, "dates": None}
+
+    if result_text.upper() == "NONE":
+        return {"has_more_dates": False, "dates": None}
+
+    # Otherwise we have some dates
+    return {"has_more_dates": True, "dates": result_text}
+
+
+def _main():
+    try:
+        result = check_website()
+        if result.get("has_more_dates"):
             subject = "CISL exam dates available"
-            body = f"The CISL page contains available exam dates:\n\n{result_text}. See {URL} for more details."
+            body = f"The CISL page contains available exam dates:\n\n{result.get('dates')}\n\nSee {URL} for more details."
             send_pushover_message(
                 user_key=PUSHOVER_USER_KEY,
                 api_token=PUSHOVER_APP_TOKEN,
                 title=subject,
-                message=body
+                message=body,
             )
+        else:
+            print("No available dates found; nothing to notify.")
 
     except Exception as e:
+        # Notify about the failure
+        subject = "CISL check failed"
+        body = f"CISL check failed with error: {e}"
+        send_pushover_message(
+            user_key=PUSHOVER_USER_KEY,
+            api_token=PUSHOVER_APP_TOKEN,
+            title=subject,
+            message=body,
+        )
         print(f"Error occurred: {e}")
 
+
 if __name__ == "__main__":
-    check_website()
+    _main()
