@@ -3,6 +3,7 @@
 import requests
 from google import genai
 import os
+import json
 import sys
 import logging
 
@@ -65,11 +66,18 @@ def check_website():
 
     client = genai.Client(api_key=GEMINI_API_KEY)
     prompt = f"""
-        Extract the information about exam dates for citizenship applicants from 
-        the following HTML content:\n\n{response.text}\n\nJust output 'NONE' if 
-        there are no dates or are all fully booked. Otherwise, list the available 
-        dates.
-        Do not include any additional text.
+        Analyze the following HTML and return a JSON object with the following keys:
+        - "has_more_dates": true if there are available/open exam dates for citizen 
+           applicants, false otherwise.
+        - "dates_found": a string (or array) listing any dates mentioned on the page,
+           including dates that are unavailable or that are not for citizenship applicants
+        - "notes": optional contextual notes about the dates (e.g. "all fully booked",
+           "dates are for language certification, not citizenship")
+
+        Provide ONLY a single valid JSON object as output, with no surrounding text.
+
+        HTML:
+        {response.text}
     """
     lm_response = client.models.generate_content(
         model="gemini-3-pro-preview",
@@ -77,13 +85,31 @@ def check_website():
     result_text = lm_response.text.strip()
 
     if not result_text:
-        return {"has_more_dates": False, "dates": None}
+        logger.error("Empty response from language model")
+        raise Exception("Empty response from language model")
 
-    if result_text.upper() == "NONE":
-        return {"has_more_dates": False, "dates": None}
+    # Expect the model to return JSON. Parse and validate.
+    try:
+        parsed = json.loads(result_text)
+    except json.JSONDecodeError as e:
+        logger.error("Failed to parse model output as JSON")
+        logger.debug("Model output: %s", result_text)
+        raise Exception(f"Failed to parse model output as JSON: {e}")
 
-    # Otherwise we have some dates
-    return {"has_more_dates": True, "dates": result_text}
+    # Log the parsed state
+    logger.info("Model parsed output: %s", parsed)
+
+    # Determine 'has_more_dates' and map dates
+    dates_field = parsed.get("dates_found") or parsed.get("dates")
+    if "has_more_dates" in parsed:
+        has_more = bool(parsed.get("has_more_dates"))
+    else:
+        has_more = bool(dates_field)
+
+    logger.info("Current state - has_more_dates=%s, dates=%s",
+                has_more, dates_field)
+
+    return {"has_more_dates": has_more, "dates": dates_field}
 
 
 def _main():
