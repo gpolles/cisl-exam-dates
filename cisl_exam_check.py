@@ -3,10 +3,20 @@
 import requests
 from google import genai
 import os
+import sys
+import logging
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PUSHOVER_USER_KEY = os.getenv("PUSHOVER_USER_KEY")
 PUSHOVER_APP_TOKEN = os.getenv("PUSHOVER_APP_TOKEN")
+
+# Configure logging to stdout
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+logger = logging.getLogger(__name__)
 # Configuration
 URL = "https://iiclosangeles.esteri.it/en/lingua-e-cultura/certificazioni/"
 # Use a custom User-Agent to avoid being blocked as a bot
@@ -19,7 +29,7 @@ def send_pushover_message(user_key, api_token, message, title=None):
     This helper is safe to call from exception handlers.
     """
     if not user_key or not api_token:
-        print("Pushover credentials not set; skipping notification.")
+        logger.warning("Pushover credentials not set; skipping notification.")
         return
 
     url = "https://api.pushover.net/1/messages.json"
@@ -36,9 +46,9 @@ def send_pushover_message(user_key, api_token, message, title=None):
     try:
         response = requests.post(url, data=payload, timeout=10)
         response.raise_for_status()
-        print("Pushover: message sent successfully")∏
+        logger.info("Pushover: message sent successfully")
     except requests.exceptions.RequestException as e:
-        print(f"Pushover: failed to send message: {e}")
+        logger.exception(f"Pushover: failed to send message: {e}")
 
 
 def check_website():
@@ -89,7 +99,7 @@ def _main():
                 message=body,
             )
         else:
-            print("No available dates found; nothing to notify.")
+            logger.info("No available dates found; nothing to notify.")
 
     except Exception as e:
         # Notify about the failure
@@ -101,7 +111,7 @@ def _main():
             title=subject,
             message=body,
         )
-        print(f"Error occurred: {e}")
+        logger.exception(f"Error occurred: {e}")
 
 
 if __name__ == "__main__":
