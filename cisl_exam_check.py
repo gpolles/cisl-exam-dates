@@ -3,23 +3,40 @@
 import requests
 from google import genai
 import os
-import smtplib
-import ssl
-from email.message import EmailMessage
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+PUSHOVER_USER_KEY = os.getenv("PUSHOVER_USER_KEY")
+PUSHOVER_APP_TOKEN = os.getenv("PUSHOVER_APP_TOKEN")
 # Configuration
 URL = "https://iiclosangeles.esteri.it/en/lingua-e-cultura/certificazioni/"
 # Use a custom User-Agent to avoid being blocked as a bot
 HEADERS = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"}
 
-# Email configuration (read from environment)
-SMTP_SERVER = os.getenv("SMTP_SERVER")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
-SMTP_USERNAME = os.getenv("SMTP_USERNAME")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
-EMAIL_FROM = os.getenv("EMAIL_FROM", SMTP_USERNAME)
-EMAIL_TO = os.getenv("EMAIL_TO")
+def send_pushover_message(user_key, api_token, message, title=None):
+    """
+    Sends a notification to a device via Pushover.
+    """
+    url = "https://api.pushover.net/1/messages.json"
+
+    payload = {
+        "token": api_token,
+        "user": user_key,
+        "message": message,
+    }
+
+    # Add optional title if provided
+    if title:
+        payload["title"] = title
+
+    try:
+        response = requests.post(url, data=payload)
+        response.raise_for_status() # Raise an error for bad responses (4xx, 5xx)
+
+        print("Message sent successfully!")
+        print(f"Server Response: {response.json()}")
+
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to send message: {e}")
 
 def check_website():
     try:
@@ -42,32 +59,16 @@ def check_website():
 
         if result_text and result_text.upper() != "NONE":
             subject = "CISL exam dates available"
-            body = f"The CISL page contains available exam dates:\n\n{result_text}"
-            send_email(subject, body)
+            body = f"The CISL page contains available exam dates:\n\n{result_text}. See {URL} for more details."
+            send_pushover_message(
+                user_key=PUSHOVER_USER_KEY,
+                api_token=PUSHOVER_APP_TOKEN,
+                title=subject,
+                message=body
+            )
 
     except Exception as e:
         print(f"Error occurred: {e}")
-
-
-def send_email(subject: str, body: str):
-    if not SMTP_SERVER or not SMTP_USERNAME or not SMTP_PASSWORD or not EMAIL_TO:
-        print("Email settings not fully configured; skipping email send.")
-        return
-
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = EMAIL_FROM
-    msg["To"] = EMAIL_TO
-    msg.set_content(body)
-
-    try:
-        context = ssl.create_default_context()
-        with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, context=context) as server:
-            server.login(SMTP_USERNAME, SMTP_PASSWORD)
-            server.send_message(msg)
-        print(f"Email sent to {EMAIL_TO}")
-    except Exception as e:
-        print(f"Failed to send email: {e}")
 
 if __name__ == "__main__":
     check_website()
